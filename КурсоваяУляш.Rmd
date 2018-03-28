@@ -1,0 +1,219 @@
+---
+title: "Курсовая работа"
+author: "Уляшкина Алена, 125группа, ПАЭ"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+#Создание моделей линейной регрессии потоков углексилого газа за осенний период 2013 года по данным измерений методом турбулентной пульсации
+
+##Обработка первоначальных данных
+###Подготовка к корреляционному анализу#
+
+tbl = read.csv("eddypro.csv", skip = 1, na = c("","NA","-9999", "-9999.0"), 
+
+comment = c("["))
+
+###Преобразуем таблицу
+
+tbl = tbl[-1,] 
+
+tbl 
+
+###Из всего количества данных выбираем те, которые связанны с осенним периодом
+
+tbl=tbl[tbl$DOY > 244 & tbl$DOY < 335,] 
+
+tbl 
+
+###Внимательнее посмотрим на сами переменные и для этого воспользуеся функцией glimpse(), которая более наглядно представляет каждую отдельную переменную
+
+glimpse(tbl) 
+
+###Select() позволяет быстро получить полезное подмножество, используя операции, основанные на именах переменных
+
+tbl = select(tbl, -(roll)) 
+
+###Добавим новые столбцы, которые являются функциями существующих столбцов
+###Переменные типа char преобразуем их все в факторы
+
+tbl = tbl %>% mutate_if(is.character, factor) 
+
+###Здесь мы использовали функию mutate_if которая делает преобразование над колонкой - factor() при полученни значения TRUE от функции первого параметра - is.character()
+###Заменяем ненужные нам символы
+
+names(tbl) = str_replace_all(names(tbl), "[!]","_emph_") 
+
+###Нужно сделать такое последовательно много раз(т.к. нам нужно избавиться не только от !), что приведет к совершенно не читаемому результату. Поэтому воспользуеvся оператором пайппинга
+
+names(tbl) = names(tbl) %>% 
+  str_replace_all("[!]","_emph_") %>% 
+  str_replace_all("[?]","_quest_") %>% 
+  str_replace_all("[*]","_star_") %>% 
+  str_replace_all("[+]","_plus_") %>% 
+  str_replace_all("[-]","_minus_") %>% 
+  str_replace_all("[@]","_at_") %>% 
+  str_replace_all("[$]","_dollar_") %>% 
+  str_replace_all("[#]","_hash_") %>% 
+  str_replace_all("[/]","_div_") %>% 
+  str_replace_all("[%]","_perc_") %>% 
+  str_replace_all("[&]","_amp_") %>% 
+  str_replace_all("[\\^]","_power_") %>% 
+  str_replace_all("[()]","_") 
+
+glimpse(tbl) 
+
+###Берем каждую колонку таблицы, передаем ее в функию в виде вектора и выдаем результат в виде вектора длинной равной количеству колонок в таблице
+
+sapply(tbl,is.numeric) 
+
+###Подставляем этот вектор в саму таблицу и получаем таблицу состояющую только из интересующих нас колонок
+
+tbl_numeric = tbl[,sapply(tbl,is.numeric)] 
+
+###Получаем таблицу содержащую все остальные колонки
+
+tbl_non_numeric = tbl[,!sapply(tbl,is.numeric) ] 
+
+##Корреляционный анализ
+
+cor_td = cor(tbl_numeric) 
+
+cor_td 
+
+###Необходимо избаиться от все строк, где есть хоть одно значение NA
+
+cor_td = cor(drop_na(tbl_numeric)) 
+
+cor_td 
+
+###Преобразуем матрицу в таблицу
+
+cor_td = cor(drop_na(tbl_numeric)) %>% as.data.frame %>% select(co2_flux) 
+
+vars = row.names(cor_td)[cor_td$co2_flux^2 > .1] %>% na.exclude 
+
+vars
+
+    [1] "DOY"                 "co2_flux"            "h2o_molar_density" 
+    [4] "h2o_mole_fraction"   "h2o_mixing_ratio"    "air_pressure"
+    [7] "air_density"         "air_heat_capacity"   "air_molar_volume"
+    [10] "water_vapor_density" "e"                   "specific_humidity" 
+    [13] "Tdew"                "un_co2_flux"         "w.co2_cov"
+    [16] "h2o"                 "h2o.1"               "flowrate"
+    attr(,"na.action")
+    [1]  3  4  5  6 19 20 21 22 23 24 25 26 27
+    attr(,"class")
+    [1] "exclude"
+
+###Соберем все переменные из вектора с именнами переменных в одну формулу
+
+formula1 = as.formula(paste("co2_flux~" , paste(vars,collapse = "+"), sep=""))
+
+##Создание линейной модели
+
+mod = lm(formula1, data=tbl_numeric)
+
+###Сравниваем различия между большой объединяющей группой и ее отдельными подгруппами по mod
+
+anova(mod)
+
+###Далее, с помощью функции summary(), получим общую информацию по нашей модели (mod), не забывая смотреть на коэффициент детерминации (R2), который не должен быть меньше 0,7.
+
+summary(mod)
+
+###Создаем новую формулу уже со взаимодействиями
+
+formula2 = co2_flux ~ (DOY + co2_flux + h2o_molar_density + h2o_mole_fraction + h2o_mixing_ratio + water_vapor_density + e + specific_humidity + Tdew + un_co2_flux + w.co2_cov + h2o + h2o.1)^2
+
+###Тоже самое делаем со второй моделью
+
+mod1 = lm(formula2, data=tbl_numeric)
+
+###Смотрим, какие переменные и взаимодействия необходимо убрать для созданя идеальной модели
+
+anova(mod1)
+
+###Следим за коэффициентом детерминации
+summary(mod1)
+
+###Упрощаем нашу модель. Создаем новую формулу. Убираем ненужные переменные
+
+formula3 = co2_flux ~ (DOY + co2_flux + h2o_molar_density + h2o_mole_fraction + h2o_mixing_ratio + water_vapor_density + e + specific_humidity + Tdew + un_co2_flux + w.co2_cov + h2o + h2o.1)^2 - h2o_mole_fraction:Tdew - h2o_mole_fraction:un_co2_flux - h2o_mixing_ratio:un_co2_flux - water_vapor_density:h2o - Tdew:h2o - un_co2_flux:h2o - un_co2_flux:h2o.1 - w.co2_cov:h2o
+
+mod2 = lm(formula3, data=tbl_numeric)
+
+###Смотрим, что необходимо убрать на этот раз
+
+anova(mod2)
+
+summary(mod2)
+
+###Продолжаем упрощать нашу модель, удаляя ненужные переменные
+
+formula4 = co2_flux ~ (DOY + co2_flux + h2o_molar_density + h2o_mole_fraction + h2o_mixing_ratio + water_vapor_density + e + specific_humidity + Tdew + un_co2_flux + w.co2_cov + h2o + h2o.1)^2 - h2o_mole_fraction:Tdew - h2o_mole_fraction:un_co2_flux - h2o_mixing_ratio:un_co2_flux - water_vapor_density:h2o - Tdew:h2o - un_co2_flux:h2o - un_co2_flux:h2o.1 - w.co2_cov:h2o - w.co2_cov:h2o.1 - un_co2_flux:w.co2_cov - h2o_mole_fraction:h2o
+
+mod3 = lm(formula4, data=tbl_numeric)
+
+###Смотрим, что ненужынх переменных больше нет
+
+anova(mod3)
+
+###Коэффициент детерминации идеальный
+
+summary(mod3)
+
+    Call:
+    lm(formula = formula4, data = tbl_numeric)
+    Residuals:
+     Min         1Q     Median         3Q        Max
+     -4.145e-05 -2.600e-06  9.300e-08  2.519e-06  5.617e-05
+     Coefficients: (16 not defined because of singularities)
+     Estimate Std. Error  t value Pr(>|t|)
+     (Intercept)                           -6.876e-01  1.792e-01   -3.837 0.000129***
+     DOY                                    3.602e-04  1.392e-04    2.587 0.009761 **
+     h2o_molar_density                      2.314e-03  3.475e-04    6.658 3.85e-11 ***
+     h2o_mole_fraction                     -8.787e+01  3.798e+01   -2.314 0.020813 *
+     h2o_mixing_ratio                      -3.490e+00  3.670e+00   -0.951 0.341836
+     water_vapor_density                   -3.421e+02  3.484e+01   -9.818  < 2e-16 ***
+     e                                     -7.139e-04  2.580e-04   -2.768 0.005716 **
+     specific_humidity                      1.470e+05  5.555e+04    2.647 0.008202 **
+     Tdew                                   2.737e-03  7.215e-04    3.793 0.000154 ***
+     w.co2_cov                             -1.150e+02  5.303e+00  -21.679  < 2e-16 ***
+     h2o                                   -8.790e-05  3.452e-05   -2.547 0.010978 *
+     h2o.1                                 -9.421e-03  3.672e-02   -0.257 0.797529
+     co2_flux:DOY                          -1.796e-06  1.562e-07  -11.493  < 2e-16 ***
+     DOY:h2o_molar_density                 -1.654e-07  9.714e-08   -1.702 0.088903 .
+     DOY:h2o_mole_fraction                  6.236e-06  1.058e-04    0.059 0.953009 
+     DOY:h2o_mixing_ratio                  -3.462e-05  1.088e-05   -3.182 0.001490 **
+     DOY:water_vapor_density               -3.081e-04  3.331e-04   -0.925 0.355047 
+     DOY:e                                  1.923e-08  5.114e-09    3.760 0.000176 ***
+     DOY:specific_humidity                         NA         NA       NA       NA
+     DOY:w.co2_cov                          8.261e-05  6.884e-05    1.200 0.230352
+     DOY:h2o                                1.661e-07  9.590e-08    1.732 0.083407 .
+     DOY:h2o.1                              2.927e-05  1.044e-04    0.280 0.779344
+     co2_flux:h2o_molar_density             1.357e-06  1.924e-06    0.705 0.480868
+     co2_flux:h2o_molar_density             1.357e-06  1.924e-06    0.705 0.480868
+     co2_flux:water_vapor_density          -3.761e-01  6.178e-02   -6.087 1.45e-09 ***
+     co2_flux:e                            -3.250e-05  1.781e-07 -182.436  < 2e-16 ***
+     co2_flux:specific_humidity             4.374e+03  2.677e+02   16.339  < 2e-16 ***
+     co2_flux:Tdew                          3.772e-03  7.300e-07 5166.705  < 2e-16 ***
+     co2_flux:un_co2_flux                   1.089e-05  9.685e-06    1.125 0.260830 
+     co2_flux:w.co2_cov                    -4.193e-04  3.829e-04   -1.095 0.273608
+     co2_flux:h2o                           2.651e-06  1.711e-06    1.550 0.121431
+     h2o_molar_density:h2o_mole_fraction    1.402e-04  1.479e-04    0.948 0.343179
+     h2o_molar_density:h2o_mixing_ratio    -1.456e-04  3.273e-05   -4.448 9.27e-06 ***
+     h2o_molar_density:water_vapor_density -1.662e-03  1.020e-03   -1.629 0.103537
+     h2o_molar_density:e                   -1.354e-07  1.813e-07   -0.747 0.455190
+     h2o_molar_density:specific_humidity           NA         NA       NA       NA
+     h2o_molar_density:Tdew                -8.364e-06  1.297e-06   -6.448 1.51e-10 ***
+     h2o_molar_density:un_co2_flux          1.080e-05  4.296e-06    2.514 0.012035 *
+     h2o_molar_density:w.co2_cov           -6.117e-04  1.672e-04   -3.659 0.000262 ***
+     h2o_molar_density:h2o                 -9.117e-09  1.037e-08   -0.879 0.379436 
+     h2o_molar_density:h2o.1                3.130e-05  1.487e-04    0.210 0.833360
+     h2o_mole_fraction:h2o_mixing_ratio            NA         NA       NA       NA
+
+###модель идеально описывает полученные данные
